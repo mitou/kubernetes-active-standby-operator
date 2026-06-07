@@ -1,0 +1,43 @@
+# RBAC for the active-standby-operator.
+#
+# The operator is namespace-scoped: it only ever touches pods, endpointslices
+# and events in the namespace it manages, so a Role (not a ClusterRole) is all it
+# needs. Replace "my-app" below with the namespace your workload runs in.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: active-standby-operator
+  namespace: my-app
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: active-standby-operator
+  namespace: my-app
+rules:
+  # watch pods, patch the role label, delete a wedged active pod.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch", "delete"]
+  # confirm a freshly-promoted pod's endpoint is ready before demoting the old one.
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+  # surface failovers / degraded states as Events.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: active-standby-operator
+  namespace: my-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: active-standby-operator
+subjects:
+  - kind: ServiceAccount
+    name: active-standby-operator
+    namespace: my-app

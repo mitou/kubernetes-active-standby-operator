@@ -1,0 +1,103 @@
+# Deployment for the active-standby-operator.
+#
+# Edit the namespace ("my-app") and the env vars marked REQUIRED for your
+# workload. Apply deploy/rbac.yaml first.
+#
+# Single instance + Recreate strategy: there must never be two operators making
+# conflicting label decisions at the same time, so no leader election is needed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: active-standby-operator
+  namespace: my-app
+  labels:
+    app: active-standby-operator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: active-standby-operator
+  template:
+    metadata:
+      labels:
+        app: active-standby-operator
+    spec:
+      serviceAccountName: active-standby-operator
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: operator
+          image: ghcr.io/mitou/kubernetes-active-standby-operator:latest
+          imagePullPolicy: Always
+          env:
+            # --- REQUIRED: which workload to manage ---
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_LABEL_SELECTOR   # REQUIRED: selects the managed pods
+              value: app=myapp
+            - name: SERVICE_NAME         # REQUIRED: Service fronting the pods
+              value: myapp
+
+            # --- Behaviour (defaults shown; override as needed) ---
+            - name: ROLE_LABEL_KEY
+              value: active-standby-role
+            - name: ROLE_LABEL_VALUE
+              value: active
+            - name: POD_PORT             # port the health probe targets
+              value: "8080"
+            - name: PROBE_PATH
+              value: /healthz
+            # Optional: require this substring in the probe body (e.g. '"status":"OK"').
+            # - name: PROBE_EXPECT_BODY
+            #   value: '"status":"OK"'
+            - name: PROBE_TIMEOUT
+              value: 3s
+            - name: PROBE_LATENCY_BUDGET
+              value: 2s
+            - name: RECONCILE_INTERVAL
+              value: 5s
+            - name: FAILURE_THRESHOLD
+              value: "3"
+            - name: FAILOVER_COOLDOWN
+              value: 60s
+            - name: DELETE_STUCK_ACTIVE
+              value: "true"
+            - name: ENDPOINT_PROGRAM_WAIT
+              value: 30s
+            # Downward API: used as the involvedObject for namespace-level Events.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          ports:
+            - name: health
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: 15
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+              ephemeral-storage: 100Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+              ephemeral-storage: 100Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
